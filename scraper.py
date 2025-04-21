@@ -69,12 +69,34 @@ def search_actress_videos(actress_name, page=1):
         # Parse the page
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find all video containers - try different possible selectors
-        video_containers = soup.select('.item, .card, .thumbnail, .movie-item, article')
+        # Find all video containers - based on our debugging, these are the right selectors
+        card_containers = soup.select('.card-container')
+        video_cards = soup.select('.video-card')
         
+        # For debugging, print each selector separately to see what we're finding
+        logger.debug(f"Found {len(card_containers)} card-container elements")
+        logger.debug(f"Found {len(video_cards)} video-card elements")
+        
+        # Use card-container as our main container
+        video_containers = card_containers
+        
+        # If we found no containers, try to look for data in scripts
         if not video_containers:
+            # Try to find video data in JSON scripts
+            scripts = soup.find_all('script')
+            for script in scripts:
+                script_text = script.string
+                if script_text and 'window.__NUXT__=' in script_text:
+                    logger.debug("Found Nuxt data in script, attempting to extract")
+                    try:
+                        # Extract videos from script data
+                        # This would need custom parsing for the specific site
+                        pass
+                    except Exception as e:
+                        logger.error(f"Error parsing Nuxt data: {str(e)}")
+            
             logger.warning(f"No videos found for actress: {actress_name} on page {page}")
-            logger.debug(f"Page content: {response.text[:500]}...") # Log a snippet of the page to help debug
+            logger.debug(f"Page content snippet: {response.text[:500]}...") 
             return []
         
         videos = []
