@@ -34,6 +34,22 @@ def download_file(url, output_path, session=None):
         logger.warning(f"No URL provided for download to {output_path}")
         return False
     
+    # Verify URL format
+    if not isinstance(url, str):
+        logger.error(f"Invalid URL type for {url}, expected string")
+        return False
+        
+    # Check for relative URLs that need to be converted to absolute
+    if url.startswith('/'):
+        logger.warning(f"Relative URL detected: {url}, converting to absolute")
+        # Convert relative URL to absolute using the base domain
+        url = f"https://javtrailers.com{url}"
+        
+    # Validate URL has proper scheme
+    if not url.startswith(('http://', 'https://')):
+        logger.error(f"Invalid URL scheme: {url}")
+        return False
+        
     try:
         # Create session if not provided
         if not session:
@@ -43,8 +59,15 @@ def download_file(url, output_path, session=None):
                 'Referer': 'https://javtrailers.com/',
             })
         
+        logger.debug(f"Attempting to download from: {url}")
+        
         # Add a small delay to avoid being rate-limited
         time.sleep(random.uniform(0.5, 2.0))
+        
+        # Try alternative URL formats if this is DMM URL
+        if 'dmm.co.jp' in url:
+            logger.debug(f"DMM URL detected: {url}")
+            # We'll let it proceed as is, DMM URLs usually work well
         
         # Stream the download to handle large files
         with session.get(url, stream=True) as response:
@@ -53,7 +76,41 @@ def download_file(url, output_path, session=None):
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
-            # Write the file
+            # Check if response is valid by looking at content type
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' in content_type and not url.endswith(('.mp4', '.jpg', '.jpeg', '.png', '.gif')):
+                logger.warning(f"Expected file but got HTML response from {url}")
+                
+                # Try to find a direct download link in the HTML response
+                try:
+                    import re
+                    from bs4 import BeautifulSoup
+                    
+                    html_content = response.text
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Look for video tags or source tags
+                    video_src = None
+                    video_tags = soup.select('video source[src], source[src], video[src]')
+                    
+                    for tag in video_tags:
+                        if tag.has_attr('src'):
+                            src_value = tag.get('src')
+                            if isinstance(src_value, str) and src_value.endswith('.mp4'):
+                                video_src = src_value
+                                break
+                            
+                    if video_src:
+                        logger.info(f"Found direct media link in HTML: {video_src}")
+                        # Create a new request for the actual file
+                        return download_file(video_src, output_path, session)
+                        
+                    # If we can't find a direct link, we'll fall back to saving the HTML response
+                    logger.warning("Could not find direct media link in HTML, falling back to saving HTML content")
+                except Exception as e:
+                    logger.error(f"Error parsing HTML response: {str(e)}")
+            
+            # If we got here, we're going to save whatever content was returned
             with open(output_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
@@ -108,8 +165,14 @@ def download_assets(video_details, actress_name, video_code):
     
     # Download thumbnail
     if video_details.get('thumbnail_url'):
-        thumbnail_path = os.path.join(base_dir, f"{video_code}_thumbnail.jpg")
-        results['thumbnail'] = download_file(video_details['thumbnail_url'], thumbnail_path, session)
+        # Check if the thumbnail URL is a default/fallback image 
+        # and don't try to download it if it's the placeholder
+        if 'no-image.jpg' not in video_details['thumbnail_url']:
+            thumbnail_path = os.path.join(base_dir, f"{video_code}_thumbnail.jpg")
+            results['thumbnail'] = download_file(video_details['thumbnail_url'], thumbnail_path, session)
+        else:
+            logger.warning(f"Skipping default thumbnail image for {video_code}")
+            results['thumbnail'] = False
     
     # Download screenshots
     screenshots_dir = os.path.join(base_dir, "screenshots")

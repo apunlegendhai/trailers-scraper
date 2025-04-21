@@ -489,7 +489,7 @@ def get_video_details(video_url):
         
         # If still no thumbnail, try to construct one from the video code
         if not thumbnail_url and video_code:
-            # Try a few common patterns for thumbnail URLs
+            # Try a few common patterns for thumbnail URLs on javtrailers
             potential_urls = [
                 f"https://javtrailers.com/thumbs/{video_code.lower()}.jpg",
                 f"https://javtrailers.com/images/{video_code.lower()}.jpg",
@@ -506,14 +506,42 @@ def get_video_details(video_url):
                         break
                 except Exception:
                     continue
+                    
+            # If still no thumbnail, try DMM.co.jp as fallback (they host a lot of JAV covers)
+            if not thumbnail_url:
+                # Extract code components
+                import re
+                code_parts = re.search(r'([A-Z]+)[^A-Z0-9]*?(\d+)', video_code)
+                if code_parts:
+                    prefix = code_parts.group(1).lower()
+                    number = code_parts.group(2).zfill(5)  # Pad to at least 5 digits
+                    
+                    # Try different patterns for DMM
+                    dmm_patterns = [
+                        # Standard DMM pattern
+                        f"https://pics.dmm.co.jp/digital/video/{prefix}{number}/{prefix}{number}ps.jpg",
+                        # Alternative pattern
+                        f"https://pics.dmm.co.jp/digital/video/{prefix.lower()}{number}/{prefix.lower()}{number}pl.jpg"
+                    ]
+                    
+                    for url in dmm_patterns:
+                        try:
+                            logger.debug(f"Trying DMM fallback: {url}")
+                            head_response = session.head(url)
+                            if head_response.status_code == 200:
+                                thumbnail_url = url
+                                logger.debug(f"Found thumbnail using DMM fallback: {thumbnail_url}")
+                                break
+                        except Exception:
+                            continue
         
         # Log the outcome
         if thumbnail_url:
             logger.debug(f"Successfully found thumbnail URL: {thumbnail_url}")
         else:
             logger.warning(f"No thumbnail URL found for {video_code}")
-            # Use a default thumbnail as last resort
-            thumbnail_url = "https://javtrailers.com/images/no-image.jpg"
+            # Don't set a default that doesn't exist
+            thumbnail_url = None
         
         # Get screenshots/preview images specific to this video
         screenshots = []
