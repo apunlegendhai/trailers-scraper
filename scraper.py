@@ -69,77 +69,150 @@ def search_actress_videos(actress_name, page=1):
         # Parse the page
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find all video containers - based on our debugging, these are the right selectors
+        # Initialize videos list
+        videos = []
+        
+        # First try to get data directly from the Nuxt.js data in JavaScript
+        scripts = soup.find_all('script')
+        nuxt_data_found = False
+        
+        for script in scripts:
+            script_text = script.string
+            if script_text and 'window.__NUXT__=' in script_text:
+                logger.debug("Found Nuxt data in script, attempting to extract")
+                try:
+                    # Extract the JSON part from the script
+                    import re
+                    import json
+                    
+                    # Extract the JSON part from the script
+                    json_match = re.search(r'window\.__NUXT__\s*=\s*(.*?)(;</script>|$)', script_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            # Try to clean and parse the JSON
+                            json_data = json_match.group(1).strip()
+                            # Remove trailing semicolons or other invalid JSON parts
+                            while json_data and not json_data[-1] in ']}":0123456789':
+                                json_data = json_data[:-1]
+                                
+                            nuxt_data = json.loads(json_data)
+                            nuxt_data_found = True
+                            logger.debug("Successfully parsed Nuxt data")
+                            
+                            # Attempt to extract video data from the expected structure
+                            if 'state' in nuxt_data and isinstance(nuxt_data['state'], dict):
+                                state = nuxt_data['state']
+                                # Look for different possible video data locations
+                                if 'videos' in state and 'items' in state['videos']:
+                                    items = state['videos']['items']
+                                    logger.debug(f"Found items in Nuxt data: {len(items)}")
+                                    
+                                    for key, video_data in items.items():
+                                        if isinstance(video_data, dict):
+                                            try:
+                                                title = video_data.get('title', '')
+                                                code = video_data.get('code', '').lower()
+                                                video_url = f"{BASE_URL}/video/{code}"
+                                                thumbnail = video_data.get('thumb', '')
+                                                
+                                                videos.append({
+                                                    'title': title,
+                                                    'url': video_url,
+                                                    'thumbnail': thumbnail
+                                                })
+                                                logger.debug(f"Added video from Nuxt data: {title}")
+                                            except Exception as e:
+                                                logger.error(f"Error extracting video item: {str(e)}")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing Nuxt JSON: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error processing Nuxt data: {str(e)}")
+        
+        # If we successfully found videos from the Nuxt data, return them
+        if videos:
+            logger.debug(f"Returning {len(videos)} videos from Nuxt data")
+            return videos
+        
+        # If no videos from Nuxt data, try DOM-based approach
+        logger.debug("No videos from Nuxt data, trying DOM approach")
+        
+        # Find containers with the observed classes from debugging
         card_containers = soup.select('.card-container')
         video_cards = soup.select('.video-card')
         
-        # For debugging, print each selector separately to see what we're finding
         logger.debug(f"Found {len(card_containers)} card-container elements")
         logger.debug(f"Found {len(video_cards)} video-card elements")
         
-        # Use card-container as our main container
-        video_containers = card_containers
-        
-        # If we found no containers, try to look for data in scripts
-        if not video_containers:
-            # Try to find video data in JSON scripts
-            scripts = soup.find_all('script')
-            for script in scripts:
-                script_text = script.string
-                if script_text and 'window.__NUXT__=' in script_text:
-                    logger.debug("Found Nuxt data in script, attempting to extract")
-                    try:
-                        # Extract videos from script data
-                        # This would need custom parsing for the specific site
-                        pass
-                    except Exception as e:
-                        logger.error(f"Error parsing Nuxt data: {str(e)}")
-            
-            logger.warning(f"No videos found for actress: {actress_name} on page {page}")
-            logger.debug(f"Page content snippet: {response.text[:500]}...") 
-            return []
-        
-        videos = []
-        for container in video_containers:
+        # Use card containers as they're more likely to contain the videos
+        for container in card_containers:
             try:
-                # Extract video information - try different potential selectors
+                # Extract elements from container
                 link_element = container.select_one('a')
-                title_element = container.select_one('.title, h2, h3, .movie-title, .card-title')
-                thumbnail_element = container.select_one('img.wp-post-image, img.thumbnail, img.card-img-top, img')
+                title_element = container.select_one('.title')
                 
-                # If we've found the necessary elements with fallback selectors
-                if link_element and title_element and thumbnail_element and 'href' in link_element.attrs and 'src' in thumbnail_element.attrs:
-                    # Get href value
-                    href_attr = link_element['href']
+                # Try multiple selectors for thumbnail
+                thumbnail_element = container.select_one('img.video-image, img, a > img')
+                
+                # Debug found elements 
+                if link_element:
+                    logger.debug(f"Found link: {link_element['href'] if 'href' in link_element.attrs else 'No href'}")
+                if title_element:
+                    logger.debug(f"Found title: {title_element.get_text(strip=True) if title_element else 'No title'}")
+                if thumbnail_element:
+                    logger.debug(f"Found thumbnail: {thumbnail_element['src'] if 'src' in thumbnail_element.attrs else 'No src'}")
+                
+                # If we have link and title, that's enough to extract useful data
+                # We can use a default thumbnail if one isn't found
+                if (link_element and 'href' in link_element.attrs and title_element):
                     
-                    # Ensure it's a string
-                    if isinstance(href_attr, list):
-                        href_value = str(href_attr[0]) if href_attr else ''
-                    else:
-                        href_value = str(href_attr)
+                    # Get href as string
+                    href = str(link_element['href'])
                     
-                    # Construct full URL
-                    if href_value.startswith('/'):
-                        video_url = f"{BASE_URL}{href_value}"
-                    elif href_value.startswith('http'):
-                        video_url = href_value
+                    # Create full URL
+                    if href.startswith('/'):
+                        video_url = f"{BASE_URL}{href}"
+                    elif href.startswith('http'):
+                        video_url = href
                     else:
-                        video_url = f"{BASE_URL}/{href_value}"
-                        
+                        video_url = f"{BASE_URL}/{href}"
+                    
+                    # Extract title and thumbnail
                     title = title_element.get_text(strip=True)
-                    thumbnail_url = thumbnail_element['src']
                     
+                    # Get thumbnail URL if available, or use a default
+                    thumbnail_url = None
+                    if thumbnail_element and 'src' in thumbnail_element.attrs:
+                        thumbnail_url = thumbnail_element['src']
+                    else:
+                        # Extract code from URL for potential thumbnail
+                        import re
+                        code_match = re.search(r'/video/([a-z0-9]+)/?$', video_url)
+                        if code_match:
+                            video_code = code_match.group(1)
+                            # Use a code-based URL that might work as thumbnail
+                            thumbnail_url = f"{BASE_URL}/thumbs/{video_code}.jpg"
+                        else:
+                            # Use a default placeholder
+                            thumbnail_url = f"{BASE_URL}/images/no-preview.jpg"
+                    
+                    # Add to results
                     videos.append({
                         'title': title,
                         'url': video_url,
                         'thumbnail': thumbnail_url
                     })
             except Exception as e:
-                logger.error(f"Error parsing video container: {str(e)}")
+                logger.error(f"Error parsing container: {str(e)}")
         
-        # Check for next page
+        # Check for pagination
         pagination = soup.select_one('.pagination')
-        has_next_page = pagination and 'Next' in pagination.get_text()
+        has_next_page = False
+        if pagination:
+            next_link = pagination.select_one('a:contains("Next")')
+            has_next_page = next_link is not None
+        
+        if not videos:
+            logger.warning(f"No videos found for actress: {actress_name} on page {page}")
         
         return videos
     
