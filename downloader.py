@@ -72,11 +72,17 @@ def download_file(url, output_path, session=None):
         # Add more headers for video requests
         if url.endswith('.mp4'):
             session.headers.update({
-                'Accept': '*/*',
+                'Accept': '*/*,video/mp4,video/*;q=0.9',
                 'Accept-Encoding': 'identity;q=1, *;q=0',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Range': 'bytes=0-',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Dest': 'video',
+                'Pragma': 'no-cache',
+                'Cache-Control': 'no-cache'
             })
+            # Add a random delay between requests
+            time.sleep(random.uniform(1, 3))
 
         # Add headers specifically for video downloads
         headers = {

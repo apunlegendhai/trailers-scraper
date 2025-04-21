@@ -320,13 +320,43 @@ def get_video_details(video_url):
         # Get trailer video URL - first try to find it in the Nuxt data
         trailer_url = None
 
-        # Try to find direct video URL first
-        video_element = soup.select_one('video source[src*=".mp4"], video[src*=".mp4"]')
-        if video_element:
-            src = video_element.get('src', '')
-            if src and isinstance(src, str) and '.mp4' in src:
-                trailer_url = src
-                logger.debug(f"Found direct video URL: {trailer_url}")
+        # Try multiple approaches to find video URL
+        video_sources = [
+            # Check video source elements
+            'video source[src*=".mp4"], video[src*=".mp4"]',
+            # Check data attributes that often contain video URLs
+            '[data-video-url]',
+            '[data-src*=".mp4"]',
+            # Check other common video elements
+            'source[type*="video/mp4"]',
+            '.video-js source'
+        ]
+        
+        for selector in video_sources:
+            video_element = soup.select_one(selector)
+            if video_element:
+                # Check src attribute
+                src = video_element.get('src', '')
+                if not src:
+                    # Check data attributes
+                    src = video_element.get('data-video-url', '') or video_element.get('data-src', '')
+                
+                if src and isinstance(src, str) and '.mp4' in src:
+                    trailer_url = src
+                    logger.debug(f"Found direct video URL: {trailer_url}")
+                    break
+                    
+        # If still no URL found, look for URL in any script tags
+        if not trailer_url:
+            scripts = soup.find_all('script', string=True)
+            for script in scripts:
+                if script.string:
+                    # Look for MP4 URLs in script content
+                    matches = re.findall(r'["\'](https?://[^"\']+\.mp4)["\']', script.string)
+                    if matches:
+                        trailer_url = matches[0]
+                        logger.debug(f"Found video URL in script: {trailer_url}")
+                        break
 
         # If no direct URL, check Nuxt data
         if not trailer_url and nuxt_data and isinstance(nuxt_data, dict) and 'state' in nuxt_data:
