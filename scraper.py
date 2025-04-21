@@ -3,7 +3,8 @@ from bs4 import BeautifulSoup
 import logging
 import random
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, quote, urlunparse
+from typing import Optional, Union, cast
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -50,8 +51,10 @@ def search_actress_videos(actress_name, page=1):
     """
     logger.debug(f"Searching for actress: {actress_name}, page: {page}")
     
-    # Create URL
-    url = f"{BASE_URL}/casts/{actress_name}"
+    # Create URL with proper URL encoding
+    from urllib.parse import quote
+    encoded_name = quote(actress_name)
+    url = f"{BASE_URL}/casts/{encoded_name}"
     if page > 1:
         url += f"?page={page}"
     
@@ -80,8 +83,17 @@ def search_actress_videos(actress_name, page=1):
                 title_element = container.select_one('.title')
                 thumbnail_element = container.select_one('img.wp-post-image')
                 
-                if link_element and title_element and thumbnail_element:
-                    video_url = urljoin(BASE_URL, link_element['href'])
+                if link_element and title_element and thumbnail_element and 'href' in link_element.attrs:
+                    # Get href value safely
+                    href_value = link_element['href']
+                    # Construct full URL manually instead of using urljoin
+                    if href_value.startswith('/'):
+                        video_url = f"{BASE_URL}{href_value}"
+                    elif href_value.startswith('http'):
+                        video_url = href_value
+                    else:
+                        video_url = f"{BASE_URL}/{href_value}"
+                        
                     title = title_element.get_text(strip=True)
                     thumbnail_url = thumbnail_element['src']
                     
@@ -120,15 +132,31 @@ def get_video_details(video_url):
     logger.debug(f"Getting video details from: {video_url}")
     
     try:
+        # Make sure the URL is properly encoded
+        from urllib.parse import urlparse, quote, urlunparse
+        parsed_url = urlparse(video_url)
+        # Ensure the path is properly encoded
+        encoded_path = quote(parsed_url.path)
+        # Rebuild the URL with the encoded path
+        encoded_url = urlunparse((
+            parsed_url.scheme, 
+            parsed_url.netloc, 
+            encoded_path,
+            parsed_url.params, 
+            parsed_url.query, 
+            parsed_url.fragment
+        ))
+        
         session = get_session()
-        response = session.get(video_url)
+        response = session.get(encoded_url)
         response.raise_for_status()
         
         # Parse the page
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Get video code (usually in the title or URL)
-        title = soup.select_one('h1').get_text(strip=True) if soup.select_one('h1') else ''
+        h1_element = soup.select_one('h1')
+        title = h1_element.get_text(strip=True) if h1_element else ''
         video_code = ''
         
         # Try to extract code from the title (usually in brackets or at the beginning)
