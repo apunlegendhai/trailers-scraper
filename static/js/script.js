@@ -71,19 +71,19 @@ loadMoreBtn.addEventListener('click', () => {
 // Functions
 async function searchVideos(actressName, page, clearResults) {
     if (isLoading) return;
-    
+
     setLoading(true);
-    
+
     try {
         // Show results container
         resultsContainer.classList.remove('d-none');
-        
+
         // Clear previous results if needed
         if (clearResults) {
             resultsGrid.innerHTML = '';
             noResultsMessage.classList.add('d-none');
         }
-        
+
         // Make API request
         const response = await fetch('/search', {
             method: 'POST',
@@ -92,21 +92,21 @@ async function searchVideos(actressName, page, clearResults) {
             },
             body: JSON.stringify({ actress_name: actressName, page: page })
         });
-        
+
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error(data.error || 'Unknown error occurred');
         }
-        
+
         // Handle results
         if (data.videos && data.videos.length > 0) {
             // Update results count
             resultsCount.textContent = `${data.videos.length} videos`;
-            
+
             // Render videos
             renderVideos(data.videos);
-            
+
             // If no videos returned, assume no more pages
             if (data.videos.length < 10) {
                 hasMoreResults = false;
@@ -121,7 +121,7 @@ async function searchVideos(actressName, page, clearResults) {
             hasMoreResults = false;
             loadMoreBtn.classList.add('disabled');
             loadMoreBtn.textContent = 'No More Results';
-            
+
             if (clearResults) {
                 noResultsMessage.classList.remove('d-none');
             }
@@ -136,25 +136,25 @@ async function searchVideos(actressName, page, clearResults) {
 
 function renderVideos(videos) {
     const template = document.getElementById('result-template');
-    
+
     videos.forEach(video => {
         // Clone template
         const clone = document.importNode(template.content, true);
-        
+
         // Set content
         const thumbnail = clone.querySelector('.result-thumbnail');
         const title = clone.querySelector('.result-title');
         const downloadBtn = clone.querySelector('.download-btn');
-        
+
         thumbnail.src = video.thumbnail;
         thumbnail.alt = video.title;
         title.textContent = video.title;
-        
+
         // Set up download button
         downloadBtn.addEventListener('click', () => {
             downloadVideo(video.url, currentActress);
         });
-        
+
         // Append to grid
         resultsGrid.appendChild(clone);
     });
@@ -162,16 +162,16 @@ function renderVideos(videos) {
 
 async function downloadVideo(videoUrl, actressName) {
     if (isLoading) return;
-    
+
     // Show status container
     statusContainer.classList.remove('d-none');
     downloadDetails.classList.add('d-none');
     downloadStatus.classList.remove('alert-success', 'alert-danger');
     downloadStatus.classList.add('alert-info');
     statusMessage.textContent = 'Downloading video...';
-    
+
     setLoading(true);
-    
+
     try {
         // Make API request
         const response = await fetch('/download', {
@@ -181,25 +181,25 @@ async function downloadVideo(videoUrl, actressName) {
             },
             body: JSON.stringify({ video_url: videoUrl, actress_name: actressName })
         });
-        
+
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error(data.error || 'Unknown error occurred');
         }
-        
+
         // Update status
         downloadStatus.classList.remove('alert-info', 'alert-danger');
         downloadStatus.classList.add('alert-success');
         statusMessage.textContent = data.message || 'Download completed successfully';
-        
+
         // Show details
         displayDownloadDetails(data.details, actressName);
     } catch (error) {
         console.error('Error downloading video:', error);
         downloadStatus.classList.remove('alert-info', 'alert-success');
         downloadStatus.classList.add('alert-danger');
-        statusMessage.textContent = `Error: ${error.message}`;
+        statusMessage.textContent = `Error: ${error.message || 'Failed to download. Please try again.'}`;
     } finally {
         setLoading(false);
     }
@@ -207,16 +207,16 @@ async function downloadVideo(videoUrl, actressName) {
 
 async function downloadRandomVideo(actressName) {
     if (isLoading) return;
-    
+
     // Show status container
     statusContainer.classList.remove('d-none');
     downloadDetails.classList.add('d-none');
     downloadStatus.classList.remove('alert-success', 'alert-danger');
     downloadStatus.classList.add('alert-info');
     statusMessage.textContent = 'Finding and downloading a random video...';
-    
+
     setLoading(true);
-    
+
     try {
         // Make API request
         const response = await fetch('/download_random', {
@@ -226,25 +226,25 @@ async function downloadRandomVideo(actressName) {
             },
             body: JSON.stringify({ actress_name: actressName })
         });
-        
+
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error(data.error || 'Unknown error occurred');
         }
-        
+
         // Update status
         downloadStatus.classList.remove('alert-info', 'alert-danger');
         downloadStatus.classList.add('alert-success');
         statusMessage.textContent = `Downloaded: ${data.video_title || 'Random video'}`;
-        
+
         // Show details
         displayDownloadDetails(data.details, actressName);
     } catch (error) {
         console.error('Error downloading random video:', error);
         downloadStatus.classList.remove('alert-info', 'alert-success');
         downloadStatus.classList.add('alert-danger');
-        statusMessage.textContent = `Error: ${error.message}`;
+        statusMessage.textContent = `Error: ${error.message || 'Failed to download. Please try again.'}`;
     } finally {
         setLoading(false);
     }
@@ -252,29 +252,29 @@ async function downloadRandomVideo(actressName) {
 
 function displayDownloadDetails(details, actressName) {
     if (!details || !details.summary) return;
-    
+
     // Show details container
     downloadDetails.classList.remove('d-none');
-    
+
     // Fill in details
     downloadActress.textContent = actressName;
     downloadCode.textContent = details.summary.video_code || 'Unknown';
-    
+
     // Trailer status
     downloadTrailer.className = 'badge rounded-pill';
     downloadTrailer.classList.add(details.trailer ? 'bg-success' : 'bg-danger');
     downloadTrailer.textContent = details.trailer ? 'Downloaded' : 'Failed';
-    
+
     // Thumbnail status
     downloadThumbnail.className = 'badge rounded-pill';
     downloadThumbnail.classList.add(details.thumbnail ? 'bg-success' : 'bg-danger');
     downloadThumbnail.textContent = details.thumbnail ? 'Downloaded' : 'Failed';
-    
+
     // Screenshots status
     const totalScreenshots = details.summary.total_screenshots || 0;
     const successfulScreenshots = details.summary.successful_screenshots || 0;
     downloadScreenshots.textContent = `${successfulScreenshots}/${totalScreenshots}`;
-    
+
     if (successfulScreenshots === 0) {
         downloadScreenshots.className = 'badge rounded-pill bg-danger';
     } else if (successfulScreenshots < totalScreenshots) {
@@ -282,19 +282,19 @@ function displayDownloadDetails(details, actressName) {
     } else {
         downloadScreenshots.className = 'badge rounded-pill bg-success';
     }
-    
+
     // Directory
     downloadDirectory.textContent = details.summary.directory || 'Unknown location';
 }
 
 function setLoading(loading) {
     isLoading = loading;
-    
+
     // Update UI elements
     searchBtn.disabled = loading;
     randomBtn.disabled = loading;
     loadMoreBtn.disabled = loading;
-    
+
     if (loading) {
         searchBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Searching...';
         loadMoreBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
@@ -313,10 +313,10 @@ function showAlert(message, type = 'info') {
         ${message}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
-    
+
     // Insert at top of page
     document.querySelector('.container').prepend(alertEl);
-    
+
     // Auto dismiss after 5 seconds
     setTimeout(() => {
         const bsAlert = new bootstrap.Alert(alertEl);

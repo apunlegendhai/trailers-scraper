@@ -498,13 +498,14 @@ def get_video_details(video_url):
             
             for potential_url in potential_urls:
                 try:
-                    # Check if URL exists
-                    head_response = session.head(potential_url)
+                    # Check if URL exists with timeout
+                    head_response = session.head(potential_url, timeout=10)
                     if head_response.status_code == 200:
                         thumbnail_url = potential_url
                         logger.debug(f"Found thumbnail using constructed URL: {thumbnail_url}")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to check thumbnail URL {potential_url}: {str(e)}")
                     continue
                     
             # If still no thumbnail, try DMM.co.jp as fallback (they host a lot of JAV covers)
