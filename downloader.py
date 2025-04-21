@@ -78,9 +78,25 @@ def download_file(url, output_path, session=None):
                 'Range': 'bytes=0-',
             })
 
+        # Add headers specifically for video downloads
+        headers = {
+            'Range': 'bytes=0-',
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity;q=1, *;q=0',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Dest': 'video'
+        }
+        session.headers.update(headers)
+        
         # Stream the download to handle large files
-        with session.get(url, stream=True, allow_redirects=True, timeout=30) as response:
+        with session.get(url, stream=True, allow_redirects=True, timeout=60) as response:
             response.raise_for_status()
+            
+            # Verify content type
+            content_type = response.headers.get('Content-Type', '').lower()
+            if not any(typ in content_type for typ in ['video', 'application/octet-stream', 'binary']):
+                logger.warning(f"Unexpected content type: {content_type}")
             
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
