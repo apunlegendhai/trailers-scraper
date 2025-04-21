@@ -51,12 +51,12 @@ def search_actress_videos(actress_name, page=1):
     """
     logger.debug(f"Searching for actress: {actress_name}, page: {page}")
     
-    # Create URL with proper URL encoding
+    # Use search functionality instead of direct actress URL
     from urllib.parse import quote
-    encoded_name = quote(actress_name)
-    url = f"{BASE_URL}/casts/{encoded_name}"
+    encoded_query = quote(actress_name)
+    url = f"{BASE_URL}/search?q={encoded_query}"
     if page > 1:
-        url += f"?page={page}"
+        url += f"&page={page}"
     
     logger.debug(f"Searching URL: {url}")
     
@@ -68,25 +68,34 @@ def search_actress_videos(actress_name, page=1):
         # Parse the page
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find all video containers
-        video_containers = soup.select('.item')
+        # Find all video containers - try different possible selectors
+        video_containers = soup.select('.item, .card, .thumbnail, .movie-item, article')
         
         if not video_containers:
             logger.warning(f"No videos found for actress: {actress_name} on page {page}")
+            logger.debug(f"Page content: {response.text[:500]}...") # Log a snippet of the page to help debug
             return []
         
         videos = []
         for container in video_containers:
             try:
-                # Extract video information
+                # Extract video information - try different potential selectors
                 link_element = container.select_one('a')
-                title_element = container.select_one('.title')
-                thumbnail_element = container.select_one('img.wp-post-image')
+                title_element = container.select_one('.title, h2, h3, .movie-title, .card-title')
+                thumbnail_element = container.select_one('img.wp-post-image, img.thumbnail, img.card-img-top, img')
                 
-                if link_element and title_element and thumbnail_element and 'href' in link_element.attrs:
-                    # Get href value safely
-                    href_value = link_element['href']
-                    # Construct full URL manually instead of using urljoin
+                # If we've found the necessary elements with fallback selectors
+                if link_element and title_element and thumbnail_element and 'href' in link_element.attrs and 'src' in thumbnail_element.attrs:
+                    # Get href value
+                    href_attr = link_element['href']
+                    
+                    # Ensure it's a string
+                    if isinstance(href_attr, list):
+                        href_value = str(href_attr[0]) if href_attr else ''
+                    else:
+                        href_value = str(href_attr)
+                    
+                    # Construct full URL
                     if href_value.startswith('/'):
                         video_url = f"{BASE_URL}{href_value}"
                     elif href_value.startswith('http'):
@@ -155,8 +164,8 @@ def get_video_details(video_url):
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Get video code (usually in the title or URL)
-        h1_element = soup.select_one('h1')
-        title = h1_element.get_text(strip=True) if h1_element else ''
+        title_element = soup.select_one('h1, .title, .movie-title')
+        title = title_element.get_text(strip=True) if title_element else ''
         video_code = ''
         
         # Try to extract code from the title (usually in brackets or at the beginning)
@@ -170,25 +179,42 @@ def get_video_details(video_url):
             if url_match:
                 video_code = url_match.group(1)
             else:
+                # Final fallback
                 video_code = "unknown_" + str(int(time.time()))
         
-        # Get trailer video URL
-        video_element = soup.select_one('video source')
-        trailer_url = video_element['src'] if video_element else None
+        # Get trailer video URL - try multiple selectors
+        video_element = soup.select_one('video source, source[src], video[src], iframe[src]')
+        trailer_url = None
+        if video_element and 'src' in video_element.attrs:
+            trailer_url = video_element['src']
         
-        # Get thumbnail
-        thumbnail_element = soup.select_one('.wp-post-image')
-        thumbnail_url = thumbnail_element['src'] if thumbnail_element else None
+        # Get thumbnail - try multiple selectors
+        thumbnail_element = soup.select_one('.wp-post-image, .poster img, .thumbnail img, .cover img, .featured-image img, img.cover, img.poster')
+        thumbnail_url = thumbnail_element['src'] if thumbnail_element and 'src' in thumbnail_element.attrs else None
         
         # Get screenshots (usually in a gallery or under certain divs)
         screenshots = []
-        screenshot_elements = soup.select('.screenshots img, .gallery img, .preview img')
         
+        # Try multiple selectors that could contain screenshots
+        screenshot_elements = soup.select('.screenshots img, .gallery img, .preview img, .sample-images img, .movie-samples img, .movie-gallery img, .samples-list img, .thumbs img')
+        
+        if not screenshot_elements:
+            # If no dedicated screenshot containers found, look for any images besides the main thumbnail
+            all_images = soup.select('img')
+            if thumbnail_element in all_images:
+                all_images.remove(thumbnail_element)
+            screenshot_elements = all_images
+            
         for img in screenshot_elements:
+            # Check different possible image attributes
             if 'src' in img.attrs:
                 screenshots.append(img['src'])
             elif 'data-src' in img.attrs:
                 screenshots.append(img['data-src'])
+            elif 'data-original' in img.attrs:
+                screenshots.append(img['data-original'])
+            elif 'data-lazy-src' in img.attrs:
+                screenshots.append(img['data-lazy-src'])
         
         # Filter out duplicate screenshots
         screenshots = list(set(screenshots))
