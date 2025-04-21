@@ -51,12 +51,13 @@ def search_actress_videos(actress_name, page=1):
     """
     logger.debug(f"Searching for actress: {actress_name}, page: {page}")
     
-    # Use search functionality instead of direct actress URL
-    from urllib.parse import quote
-    encoded_query = quote(actress_name)
-    url = f"{BASE_URL}/search?q={encoded_query}"
+    # Format the name for URL: convert spaces to dashes, lowercase
+    formatted_name = actress_name.lower().replace(' ', '-')
+    
+    # Create the URL using the format provided - casts/actress-name
+    url = f"{BASE_URL}/casts/{formatted_name}"
     if page > 1:
-        url += f"&page={page}"
+        url += f"?page={page}"
     
     logger.debug(f"Searching URL: {url}")
     
@@ -199,11 +200,18 @@ def get_video_details(video_url):
         screenshot_elements = soup.select('.screenshots img, .gallery img, .preview img, .sample-images img, .movie-samples img, .movie-gallery img, .samples-list img, .thumbs img')
         
         if not screenshot_elements:
-            # If no dedicated screenshot containers found, look for any images besides the main thumbnail
-            all_images = soup.select('img')
-            if thumbnail_element in all_images:
-                all_images.remove(thumbnail_element)
-            screenshot_elements = all_images
+            # If no dedicated screenshot containers found, look for all images
+            screenshot_elements = soup.select('img')
+            
+            # Filter out the thumbnail if we know what it is
+            if thumbnail_element and 'src' in thumbnail_element.attrs:
+                thumbnail_src = thumbnail_element['src']
+                # Create a new list excluding the thumbnail
+                filtered_elements = []
+                for img in screenshot_elements:
+                    if 'src' in img.attrs and img['src'] != thumbnail_src:
+                        filtered_elements.append(img)
+                screenshot_elements = filtered_elements
             
         for img in screenshot_elements:
             # Check different possible image attributes
