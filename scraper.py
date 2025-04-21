@@ -320,8 +320,16 @@ def get_video_details(video_url):
         # Get trailer video URL - first try to find it in the Nuxt data
         trailer_url = None
         
-        # If we have Nuxt data, try to extract the trailer URL from it
-        if nuxt_data and isinstance(nuxt_data, dict) and 'state' in nuxt_data:
+        # Try to find direct video URL first
+        video_element = soup.select_one('video source[src*=".mp4"], video[src*=".mp4"]')
+        if video_element:
+            src = video_element.get('src', '')
+            if src and isinstance(src, str) and '.mp4' in src:
+                trailer_url = src
+                logger.debug(f"Found direct video URL: {trailer_url}")
+        
+        # If no direct URL, check Nuxt data
+        if not trailer_url and nuxt_data and isinstance(nuxt_data, dict) and 'state' in nuxt_data:
             state = nuxt_data['state']
             
             # The trailer URL might be in several different locations

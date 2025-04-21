@@ -69,12 +69,32 @@ def download_file(url, output_path, session=None):
             logger.debug(f"DMM URL detected: {url}")
             # We'll let it proceed as is, DMM URLs usually work well
         
+        # Add more headers for video requests
+        if url.endswith('.mp4'):
+            session.headers.update({
+                'Accept': '*/*',
+                'Accept-Encoding': 'identity;q=1, *;q=0',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Range': 'bytes=0-',
+            })
+
         # Stream the download to handle large files
-        with session.get(url, stream=True) as response:
+        with session.get(url, stream=True, allow_redirects=True, timeout=30) as response:
             response.raise_for_status()
             
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Check content type and size
+            content_type = response.headers.get('Content-Type', '')
+            content_length = int(response.headers.get('Content-Length', 0))
+            
+            if content_length == 0:
+                logger.error(f"Empty content received from {url}")
+                return False
+                
+            if url.endswith('.mp4') and 'video' not in content_type.lower():
+                logger.warning(f"Expected video content but got {content_type} from {url}")
             
             # Check if response is valid by looking at content type
             content_type = response.headers.get('Content-Type', '')
