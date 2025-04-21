@@ -224,6 +224,42 @@ def search_actress_videos(actress_name, page=1):
         logger.error(f"Error searching for actress: {str(e)}")
         raise Exception(f"Error processing search results: {str(e)}")
 
+def extract_nuxt_data(soup):
+    """
+    Extract Nuxt.js data from soup object
+    
+    Args:
+        soup (BeautifulSoup): Parsed HTML
+        
+    Returns:
+        dict or None: Parsed Nuxt data or None if not found/valid
+    """
+    scripts = soup.find_all('script')
+    for script in scripts:
+        script_text = script.string
+        if script_text and 'window.__NUXT__=' in script_text:
+            logger.debug("Found Nuxt data in page")
+            try:
+                # Extract the JSON part from the script
+                import re
+                import json
+                
+                # Extract the JSON part
+                json_match = re.search(r'window\.__NUXT__\s*=\s*(.*?)(;</script>|$)', script_text, re.DOTALL)
+                if json_match:
+                    try:
+                        # Clean and parse the JSON
+                        json_data = json_match.group(1).strip()
+                        while json_data and not json_data[-1] in ']}":0123456789':
+                            json_data = json_data[:-1]
+                            
+                        return json.loads(json_data)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Error parsing Nuxt JSON: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error extracting Nuxt data: {str(e)}")
+    return None
+
 def get_video_details(video_url):
     """
     Get details for a specific video
@@ -278,15 +314,171 @@ def get_video_details(video_url):
                 # Final fallback
                 video_code = "unknown_" + str(int(time.time()))
         
-        # Get trailer video URL - try multiple selectors
-        video_element = soup.select_one('video source, source[src], video[src], iframe[src]')
+        # Get trailer video URL - first try to find it in JavaScript data
         trailer_url = None
-        if video_element and 'src' in video_element.attrs:
-            trailer_url = video_element['src']
+        nuxt_data = None  # Initialize nuxt_data for later use
         
-        # Get thumbnail - try multiple selectors
-        thumbnail_element = soup.select_one('.wp-post-image, .poster img, .thumbnail img, .cover img, .featured-image img, img.cover, img.poster')
-        thumbnail_url = thumbnail_element['src'] if thumbnail_element and 'src' in thumbnail_element.attrs else None
+        # Try to extract from Nuxt data first (most reliable)
+        scripts = soup.find_all('script')
+        for script in scripts:
+            script_text = script.string
+            if script_text and 'window.__NUXT__=' in script_text:
+                logger.debug("Found Nuxt data in video page, attempting to extract trailer URL")
+                try:
+                    # Extract the JSON part from the script
+                    import re
+                    import json
+                    
+                    # Extract the JSON part
+                    json_match = re.search(r'window\.__NUXT__\s*=\s*(.*?)(;</script>|$)', script_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            # Clean and parse the JSON
+                            json_data = json_match.group(1).strip()
+                            while json_data and not json_data[-1] in ']}":0123456789':
+                                json_data = json_data[:-1]
+                                
+                            nuxt_data = json.loads(json_data)
+                            
+                            # Look for video data in different possible locations
+                            if 'state' in nuxt_data and isinstance(nuxt_data['state'], dict):
+                                state = nuxt_data['state']
+                                
+                                # Try to get from videos state
+                                if 'video' in state and 'trailer' in state['video']:
+                                    trailer_url = state['video']['trailer']
+                                    logger.debug(f"Found trailer URL in Nuxt data: {trailer_url}")
+                                
+                                # Another possible location
+                                elif 'videos' in state and 'current' in state['videos']:
+                                    current = state['videos']['current']
+                                    if 'trailer' in current:
+                                        trailer_url = current['trailer']
+                                        logger.debug(f"Found trailer URL in Nuxt videos.current: {trailer_url}")
+                        
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing Nuxt JSON in video page: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error extracting trailer from Nuxt data: {str(e)}")
+        
+        # If we still don't have a trailer URL, try direct HTML elements
+        if not trailer_url:
+            # Try multiple selectors that might contain the video
+            video_elements = soup.select('video source[src], source[src], video[src], iframe[src], a[href$=".mp4"]')
+            for video_element in video_elements:
+                if 'src' in video_element.attrs:
+                    src = video_element['src']
+                    # Check if it looks like a video URL
+                    if isinstance(src, str) and (src.endswith('.mp4') or '.mp4?' in src or 'video' in src):
+                        trailer_url = src
+                        logger.debug(f"Found trailer URL in HTML: {trailer_url}")
+                        break
+                elif 'href' in video_element.attrs:
+                    href = video_element['href']
+                    if isinstance(href, str) and href.endswith('.mp4'):
+                        trailer_url = href
+                        logger.debug(f"Found trailer URL in href: {trailer_url}")
+                        break
+                    
+        # If still no trailer, check for embedded players
+        if not trailer_url:
+            iframes = soup.select('iframe')
+            for iframe in iframes:
+                if 'src' in iframe.attrs:
+                    src = iframe.attrs['src']
+                    if 'player' in src or 'embed' in src or 'video' in src:
+                        # This is likely a video player iframe
+                        iframe_src = iframe.attrs['src']
+                        logger.debug(f"Found potential iframe video source: {iframe_src}")
+                        # Follow the iframe source
+                        try:
+                            iframe_response = session.get(iframe_src)
+                            iframe_response.raise_for_status()
+                            
+                            iframe_soup = BeautifulSoup(iframe_response.text, 'html.parser')
+                            iframe_video = iframe_soup.select_one('video source[src], source[src]')
+                            if iframe_video and 'src' in iframe_video.attrs:
+                                trailer_url = iframe_video['src']
+                                logger.debug(f"Found trailer URL in iframe: {trailer_url}")
+                                break
+                        except Exception as e:
+                            logger.error(f"Error following iframe: {str(e)}")
+                                
+        # As a last resort, look for a URL pattern in the page text that might be the video
+        if not trailer_url:
+            try:
+                video_pattern = re.search(r'(https?://[^"\s]+\.mp4[^"\s]*)', str(soup))
+                if video_pattern:
+                    trailer_url = video_pattern.group(1)
+                    logger.debug(f"Found trailer URL using regex: {trailer_url}")
+            except Exception as e:
+                logger.error(f"Error finding video with regex: {str(e)}")
+                
+        # Log the outcome
+        if trailer_url:
+            logger.debug(f"Successfully found trailer URL: {trailer_url}")
+        else:
+            logger.warning(f"No trailer URL found for {video_url}")
+        
+        # Get thumbnail - first try to extract from Nuxt data
+        thumbnail_url = None
+        
+        # Try to find in Nuxt data first if it was successfully extracted
+        if nuxt_data is not None and 'state' in nuxt_data and isinstance(nuxt_data['state'], dict):
+            state = nuxt_data['state']
+            
+            # Possible thumbnail locations
+            if 'video' in state and 'thumb' in state['video']:
+                thumbnail_url = state['video']['thumb']
+                logger.debug(f"Found thumbnail URL in Nuxt data: {thumbnail_url}")
+            elif 'videos' in state and 'current' in state['videos'] and 'thumb' in state['videos']['current']:
+                thumbnail_url = state['videos']['current']['thumb']
+                logger.debug(f"Found thumbnail URL in Nuxt videos.current: {thumbnail_url}")
+        
+        # If not found in Nuxt data, try selectors
+        if not thumbnail_url:
+            # Try multiple selectors for thumbnails
+            thumbnail_selectors = [
+                '.wp-post-image', '.poster img', '.thumbnail img', '.cover img', 
+                '.featured-image img', 'img.cover', 'img.poster', 
+                '.video-image', '.movie-image', '.main-image',
+                '.card-image', '.image img', '.preview-image'
+            ]
+            
+            for selector in thumbnail_selectors:
+                thumbnail_element = soup.select_one(selector)
+                if thumbnail_element and 'src' in thumbnail_element.attrs:
+                    thumbnail_url = thumbnail_element['src']
+                    logger.debug(f"Found thumbnail URL using selector {selector}: {thumbnail_url}")
+                    break
+        
+        # If still no thumbnail, try to construct one from the video code
+        if not thumbnail_url and video_code:
+            # Try a few common patterns for thumbnail URLs
+            potential_urls = [
+                f"https://javtrailers.com/thumbs/{video_code.lower()}.jpg",
+                f"https://javtrailers.com/images/{video_code.lower()}.jpg",
+                f"https://javtrailers.com/covers/{video_code.lower()}.jpg"
+            ]
+            
+            for potential_url in potential_urls:
+                try:
+                    # Check if URL exists
+                    head_response = session.head(potential_url)
+                    if head_response.status_code == 200:
+                        thumbnail_url = potential_url
+                        logger.debug(f"Found thumbnail using constructed URL: {thumbnail_url}")
+                        break
+                except Exception:
+                    continue
+        
+        # Log the outcome
+        if thumbnail_url:
+            logger.debug(f"Successfully found thumbnail URL: {thumbnail_url}")
+        else:
+            logger.warning(f"No thumbnail URL found for {video_code}")
+            # Use a default thumbnail as last resort
+            thumbnail_url = "https://javtrailers.com/images/no-image.jpg"
         
         # Get screenshots (usually in a gallery or under certain divs)
         screenshots = []
@@ -298,13 +490,12 @@ def get_video_details(video_url):
             # If no dedicated screenshot containers found, look for all images
             screenshot_elements = soup.select('img')
             
-            # Filter out the thumbnail if we know what it is
-            if thumbnail_element and 'src' in thumbnail_element.attrs:
-                thumbnail_src = thumbnail_element['src']
+            # Filter out the thumbnail if we have one
+            if thumbnail_url:
                 # Create a new list excluding the thumbnail
                 filtered_elements = []
                 for img in screenshot_elements:
-                    if 'src' in img.attrs and img['src'] != thumbnail_src:
+                    if 'src' in img.attrs and img['src'] != thumbnail_url:
                         filtered_elements.append(img)
                 screenshot_elements = filtered_elements
             
