@@ -31,6 +31,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Add a basic root endpoint
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running' });
+});
+
 app.get('/api/scrape', async (req, res) => {
   try {
     const options = {
@@ -55,6 +60,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`Server running at http://localhost:${port}`);
 });
