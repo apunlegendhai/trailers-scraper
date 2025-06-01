@@ -9,7 +9,7 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await axios.get('http://localhost:3000/api/scrape');
+        const response = await axios.get('/api/scrape');
         setData(response.data);
         setLoading(false);
       } catch (err) {
