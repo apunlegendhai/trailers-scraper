@@ -25,17 +25,21 @@ app.get('/api/scrape', async (req, res) => {
       pythonPath: 'python3'
     };
 
-    PythonShell.run('scraper.py', options).then(results => {
-      const data = results[0] ? JSON.parse(results[0]) : [];
-      res.json(data);
-    }).catch(err => {
-      console.error('Error running scraper:', err);
-      res.status(500).json({ error: 'Failed to run scraper' });
-    });
+    const results = await PythonShell.run('scraper.py', options);
+    const data = results[0] ? JSON.parse(results[0]) : [];
+    res.json(data);
   } catch (error) {
     console.error('Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
 });
 
 app.listen(port, () => {
